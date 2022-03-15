@@ -1,0 +1,1848 @@
+
+pre pre_M2MTransformation
+{
+	var javaDate = new Native("java.util.Date");
+	javaDate.toString().println("Model2Model transformation is starting: ");
+	In.modelFileUri.println("Input model: ");
+	In.metamodelUris.println("Input metamodels: ");	
+	var instructionIndex = 1;
+	
+	//This includes possible implementations of the subprocedure calls
+	var possibleImplementationMap = prepareCalleesMap();
+	var acceptsMap                = prepareAcceptsMap();
+	var eventMap                  = prepareEventMap();
+	var mutexMap                  = prepareMutexMap();
+	
+}
+
+post post_M2MTransformation
+{	
+	Out.modelFileUri.println("Output model: ");
+	Out.metamodelUris.println("Output metamodels: ");	
+	javaDate = new Native("java.util.Date");
+	javaDate.toString().println("Model2Model transformation has been completed: ");
+}
+
+//From root of ada to root of uppaal
+rule ada_Project2uppaal_NTA
+	transform in_project:In!Project to out_NTA:Out!NTA 
+{
+	
+	//Setting name and comment for the model
+	out_NTA.name = in_project.name;
+	out_NTA.comment = "First test";
+	
+	//Generating global definitions area
+	var globalDeclarations= new Out!GlobalDeclarations;
+	out_NTA.globalDeclarations= globalDeclarations;//Attaching it to NTA
+	
+	//Generating system declaration area  
+	var systemDeclarations= new Out!SystemDeclarations;
+	out_NTA.systemDeclarations = systemDeclarations;//Attaching it to NTA 
+	var system= new Out!System;
+	systemDeclarations.system = system;
+	var instantiationList = new Out!InstantiationList;//Instantiating template list in system definitions
+	system.instantiationList.add(instantiationList);//Setting as property
+	
+	//Creating general data types
+	var predefinedInt = new Out!PredefinedType; //int
+	predefinedInt.name = "int";
+	out_NTA.int= predefinedInt;//Attaching it to NTA
+	
+	var predefinedBool = new Out!PredefinedType; //bool
+	predefinedBool.name = "bool";
+	predefinedBool.type = Out!BuiltInType#BOOL;
+	out_NTA.bool= predefinedBool;//Attaching it to NTA
+	
+	var predefinedClock= new Out!PredefinedType;//clock
+	predefinedClock.name= "clock";
+	predefinedClock.type= Out!BuiltInType#CLOCK;
+	out_NTA.clock= predefinedClock;//Attaching it to NTA
+	
+	var predefinedChan= new Out!PredefinedType;//chan
+	predefinedChan.name= "chan";
+	predefinedChan.type= Out!BuiltInType#CHAN;
+	out_NTA.chan= predefinedChan;//Attaching it to NTA
+	
+	var predefinedVoid= new Out!PredefinedType;//void
+	predefinedVoid.name= "void";
+	predefinedVoid.type= Out!BuiltInType#VOID;
+	out_NTA.void= predefinedVoid;//Attaching it to NTA
+}
+
+//Creating template per subprocedure
+@greedy
+rule ada_Subp2uppaal_Template 
+	transform in_subp:In!Subprocedure to out_Template:Out!Template, localDeclarations:Out!LocalDeclarations, initialLocation:Out!Location
+{
+
+	//Set the name of the template same as with the class
+	out_Template.name = in_subp.getParentPackage().adaptClassNameForTemplateName() + "#" + in_subp.name.replaceNonAlphabeticChars ("$") + "#" + getLineNumber (in_subp.location);
+		
+	//Adding it as a template to template list of UPPAAL model
+	getUPPAALRootElement().template.add(out_Template);
+	
+	//Adding it as an instance to system declaration
+	getUPPAALRootElement().systemDeclarations.system.instantiationList.first().template.add(out_Template);		
+	
+	//Adding an initial location to the template
+	initialLocation.name= "initial";
+	//initialLocation.parentTemplate= out_Template; @reverse
+	initialLocation.locationTimeKind= Out!LocationKind#NORMAL;
+	out_Template.location.add(initialLocation);
+	out_Template.init = initialLocation;
+	
+	//Creating local declaration area for the template
+	out_Template.declarations = localDeclarations;
+	
+	//Creating a constant for number of instances for this template
+	var nInstancesDeclaration = new Out!DataVariableDeclaration;
+	nInstancesDeclaration.prefix = Out!DataVariablePrefix#CONST;
+	var intTypeDefinition = new Out!TypeReference;
+	intTypeDefinition.referredType = getUPPAALRootElement().int;
+	nInstancesDeclaration.typeDefinition = intTypeDefinition;
+	var nInstancesVariable = new Out!Variable;
+	nInstancesVariable.name = "N_" + out_Template.name;
+	nInstancesDeclaration.variable.add(nInstancesVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(nInstancesDeclaration);
+	//Initializing number of instances
+	var nInstancesInitializer = new Out!ExpressionInitializer;
+	var nInitializerLiteralExpression = new Out!LiteralExpression;
+	nInitializerLiteralExpression.text = "1";
+	nInstancesInitializer.expression = nInitializerLiteralExpression;
+	nInstancesVariable.initializer = nInstancesInitializer;
+	
+	//Type declaration
+	//1. Creating the TypeDeclaration
+	var templateIdTypeDeclaration = new Out!TypeDeclaration;
+	
+	//2. Setting the type reference(DeclaredType) of the TypeDeclaration
+	var templateIdDeclaredType = new Out!DeclaredType;
+	templateIdDeclaredType.name = "pid_" + out_Template.name;
+	templateIdDeclaredType.typeDeclaration = templateIdTypeDeclaration;
+	templateIdTypeDeclaration.type.add(templateIdDeclaredType);
+	
+	//3. Setting the typeDefinition reference of the TypeDeclaration
+		//3.1 Creating a ScalarTypeSpecification (TypeDefinition)
+		var idScalarTypeSpecification = new Out!ScalarTypeSpecification;
+	
+		//3.2 Setting sizeExpression reference of the ScalarTypeSpecification
+		var literalExpressionForScalarTypeDefinition = new Out!LiteralExpression;
+		literalExpressionForScalarTypeDefinition.text = nInstancesVariable.name;
+		idScalarTypeSpecification.sizeExpression = literalExpressionForScalarTypeDefinition;
+		
+		//3.3 Setting the typeDefinition reference of the TypeDeclaration to the ScalarTypeSpecification
+		templateIdTypeDeclaration.typeDefinition = idScalarTypeSpecification;
+	 
+	//4. Adding the TypeDeclaration to the global declarations
+	getUPPAALRootElement().globalDeclarations.declaration.add(templateIdTypeDeclaration);
+
+	// Trigger the resursive function to add all (nested) statements of this subprocedure
+	var stmtsPresent = false;
+	for (stmt in in_subp.statement) {
+		var loc_n_edge = stmt.createLocationsAndEdges(out_Template.location.last());
+		if (loc_n_edge.locs.notEmpty()) {
+			stmtsPresent = true;
+			out_Template.location.addAll (loc_n_edge.locs);
+			out_Template.edge.addAll (loc_n_edge.edges);
+		}
+	}
+	
+	// When subprocedure has no happy flow statements, add a dummy location with edges
+	if (not stmtsPresent) {
+		var dummyLoc : new Out!Location ();
+		dummyLoc.name = "dummyLoc"; 
+		out_Template.location.add (dummyLoc);
+		out_Template.edge.add (createEdge (initialLocation, dummyLoc));
+	}
+	
+	// Find back the outgoing edge of the initial location
+	var out_callEdge;
+	for (edge in out_Template.edge) {
+		if (edge.source = initialLocation) {
+			out_callEdge = edge;
+		} 
+	}
+	
+	// Add returning edge to the initial location
+	var out_returnEdge = new Out!Edge;
+	out_returnEdge.source = out_Template.location.last();
+	out_returnEdge.target = initialLocation;
+	out_returnEdge.parentTemplate = out_Template;
+	
+	// Find (and/or create) the call and return channels for this subprocedure
+	var in_subpEquivalents = in_subp.equivalents("ada_Subp2uppaal_channels");
+	
+	//Adding synchronization to the call edge
+	var callIdentifierExpression = new Out!IdentifierExpression;
+	callIdentifierExpression.identifier = in_subpEquivalents.get(0);
+	var callSynchronization = new Out!Synchronization;
+	callSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+	callSynchronization.channelExpression = callIdentifierExpression;
+	out_callEdge.synchronization = callSynchronization;
+	
+	//Adding synchronization to the return edge
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = in_subpEquivalents.get(1);
+	var returnSynchronization = new Out!Synchronization;
+	returnSynchronization.kind = Out!SynchronizationKind#SEND;
+	returnSynchronization.channelExpression = returnIdentifierExpression;
+	out_returnEdge.synchronization = returnSynchronization;	
+}
+
+// Recursive function to transform (nested) statements into Uppaal locations and edges
+operation In!Statement createLocationsAndEdges(prevLoc : Out!Location) : Tuple {
+	var return_tuple   = new Tuple();
+	return_tuple.locs  = new Sequence();
+	return_tuple.edges = new Sequence();
+	var localPrevLoc   = prevLoc;
+	var tempTuple      = new Tuple();
+	
+	switch (self.type.name) {
+		case "Call_statement" : 
+			for (loc in self.equivalents("ada_CallStatement2uppaal_location")) {
+				// because 'ada_CallStatement2uppaal_location' also creates a _waiting location for call-statements which don't have a matching target, delete these location again here. 
+				// because these locations will have no parent defined and will result in Uppaal M2T syntax errors
+				if (loc.name <> null) {
+					return_tuple.locs.add (loc);
+				}
+				else {
+					delete loc;
+				}
+			}
+			return_tuple.edges.add (createEdge (prevLoc, return_tuple.locs.first));
+		case "Accept" : 
+			return_tuple.locs.addAll (self.equivalents("ada_Accept2uppaal_location"));
+			
+			var out_callEdge = createEdge (prevLoc, return_tuple.locs.first);
+			return_tuple.edges.add (out_callEdge);
+			
+			//The called subprocedures synchronization declarations
+			var transformedSynchronizationChannels = self.equivalents("ada_Accept2uppaal_channels");
+
+			//Setting call synchronization on the call edge
+			var callSynchronization = new Out!Synchronization;
+			callSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+			var callIdentifierExpression = new Out!IdentifierExpression;
+			callIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+			callSynchronization.channelExpression = callIdentifierExpression;
+			out_callEdge.synchronization = callSynchronization;
+			
+		case "Rendezvous" :
+			var callRendezvous : new Out!Location();
+			callRendezvous.name = "Rendezvous_" + self.name + "_ln" + getLineNumber (self.location) + "_calling"; 
+			callRendezvous.locationTimeKind = Out!LocationKind#URGENT;
+			callRendezvous.color = Out!ColorKind#ORANGE;
+			return_tuple.locs.add (callRendezvous);
+			
+			var waitRendezvous : new Out!Location();
+			waitRendezvous.name = "Rendezvous_" + self.name + "_ln" + getLineNumber (self.location) + "_waiting"; 
+			waitRendezvous.color = Out!ColorKind#YELLOW;
+			return_tuple.locs.add (waitRendezvous);
+			
+			var returnRendezvous : new Out!Location();
+			returnRendezvous.name = "Rendezvous_" + self.name + "_ln" + getLineNumber (self.location) + "_returning"; 
+			returnRendezvous.locationTimeKind = Out!LocationKind#URGENT;
+			returnRendezvous.color = Out!ColorKind#GREEN;
+			return_tuple.locs.add (returnRendezvous);
+			
+			var callingEdge = createEdge (prevLoc, callRendezvous);
+			return_tuple.edges.add (callingEdge);
+			
+			var waitingEdge = createEdge (callRendezvous, waitRendezvous);
+			return_tuple.edges.add (waitingEdge);
+			
+			var returningEdge = createEdge (waitRendezvous, returnRendezvous);
+			return_tuple.edges.add (returningEdge);
+			
+			//For each possible implementation of this subprocedure call
+			var possibleImplementation = acceptsMap.get(self.target_location);
+			if (possibleImplementation <> null) {
+				//The called subprocedures synchronization declarations
+				var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Accept2uppaal_channels");
+			
+				//Setting call synchronization on the call edge
+				var callSynchronization = new Out!Synchronization;
+				callSynchronization.kind = Out!SynchronizationKind#SEND;
+				var callIdentifierExpression = new Out!IdentifierExpression;
+				callIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+				callSynchronization.channelExpression = callIdentifierExpression;
+				waitingEdge.synchronization = callSynchronization;
+				
+				//Setting return synchronization on the return edge
+				var returnSynchronization = new Out!Synchronization;
+				returnSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+				var returnIdentifierExpression = new Out!IdentifierExpression;
+				returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+				returnSynchronization.channelExpression = returnIdentifierExpression;
+				returningEdge.synchronization = returnSynchronization;	
+			}
+			
+		case "SetEvent" :
+			var event = eventMap.get (self.decl_location);
+			
+			var entrySetEvent : new Out!Location();
+			entrySetEvent.name = "SetEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_entry"; 
+			entrySetEvent.locationTimeKind = Out!LocationKind#URGENT;
+			entrySetEvent.color = Out!ColorKind#ORANGE;
+			return_tuple.locs.add (entrySetEvent);
+			
+			var exitSetEvent : new Out!Location();
+			exitSetEvent.name = "SetEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_exit"; 
+			exitSetEvent.locationTimeKind = Out!LocationKind#URGENT;
+			exitSetEvent.color = Out!ColorKind#GREEN;
+			return_tuple.locs.add (exitSetEvent);
+			
+			var entryEdge = createEdge (prevLoc, entrySetEvent);
+			return_tuple.edges.add (entryEdge);
+			
+			var exitEdge = createEdge (entrySetEvent, exitSetEvent);
+			return_tuple.edges.add (exitEdge);
+			
+			// When an event object is available for this ResetEvent
+			var possibleImplementation = eventMap.get(self.decl_location);
+			if (possibleImplementation <> null) {
+				//The called subprocedures synchronization declarations
+				var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Event2uppaal_channels");
+			
+				//Setting call synchronization on the call edge
+				var lockSynchronization = new Out!Synchronization;
+				lockSynchronization.kind = Out!SynchronizationKind#SEND;
+				var lockIdentifierExpression = new Out!IdentifierExpression;
+				lockIdentifierExpression.identifier = transformedSynchronizationChannels.get(0); // 1st entry is the set channel
+				lockSynchronization.channelExpression = lockIdentifierExpression;
+				exitEdge.synchronization = lockSynchronization;
+			}
+			
+		case "ResetEvent" :
+			var event = eventMap.get (self.decl_location);
+		
+			var entryResetEvent : new Out!Location();
+			entryResetEvent.name = "ResetEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_entry"; 
+			entryResetEvent.locationTimeKind = Out!LocationKind#URGENT;
+			entryResetEvent.color = Out!ColorKind#ORANGE;
+			return_tuple.locs.add (entryResetEvent);
+			
+			var exitResetEvent : new Out!Location();
+			exitResetEvent.name = "ResetEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_exit"; 
+			exitResetEvent.locationTimeKind = Out!LocationKind#URGENT;
+			exitResetEvent.color = Out!ColorKind#GREEN;
+			return_tuple.locs.add (exitResetEvent);
+			
+			var entryEdge = createEdge (prevLoc, entryResetEvent);
+			return_tuple.edges.add (entryEdge);
+			
+			var exitEdge = createEdge (entryResetEvent, exitResetEvent);
+			return_tuple.edges.add (exitEdge);
+			
+			// When an event object is available for this ResetEvent
+			var possibleImplementation = eventMap.get(self.decl_location);
+			if (possibleImplementation <> null) {
+				//The called subprocedures synchronization declarations
+				var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Event2uppaal_channels");
+			
+				//Setting call synchronization on the call edge
+				var lockSynchronization = new Out!Synchronization;
+				lockSynchronization.kind = Out!SynchronizationKind#SEND;
+				var lockIdentifierExpression = new Out!IdentifierExpression;
+				lockIdentifierExpression.identifier = transformedSynchronizationChannels.get(1); // 2nd entry is the reset channel
+				lockSynchronization.channelExpression = lockIdentifierExpression;
+				exitEdge.synchronization = lockSynchronization;
+			}
+			
+		case "WaitForEvent" :
+			var event = eventMap.get (self.decl_location);
+			
+			// When no Set or Reset available for this event in the happy flow, then there is no need to wait on it
+			if (event != null) {
+				var entryWaitEvent : new Out!Location();
+				entryWaitEvent.name = "WaitForEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_entry"; 
+				entryWaitEvent.color = Out!ColorKind#ORANGE;
+				return_tuple.locs.add (entryWaitEvent);
+				
+				var exitWaitEvent : new Out!Location();
+				exitWaitEvent.name = "WaitForEvent_" + self.name + "_ln" + getLineNumber (self.location) + "_exit"; 
+				exitWaitEvent.locationTimeKind = Out!LocationKind#URGENT;
+				exitWaitEvent.color = Out!ColorKind#GREEN;
+				return_tuple.locs.add (exitWaitEvent);
+				
+				var entryEdge = createEdge (prevLoc, entryWaitEvent);
+				return_tuple.edges.add (entryEdge);
+				
+				var exitEdge = createEdge (entryWaitEvent, exitWaitEvent);
+				return_tuple.edges.add (exitEdge);
+				
+				// When an event object is available for this WaitForEvent
+				var possibleImplementation = eventMap.get(self.decl_location);
+				if (possibleImplementation <> null) {
+					//The called subprocedures synchronization declarations
+					var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Event2uppaal_channels");
+				
+					//Setting call synchronization on the call edge
+					var lockSynchronization = new Out!Synchronization;
+					lockSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+					var lockIdentifierExpression = new Out!IdentifierExpression;
+					lockIdentifierExpression.identifier = transformedSynchronizationChannels.get(2); // 3th entry is the waitForEvent channel
+					lockSynchronization.channelExpression = lockIdentifierExpression;
+					exitEdge.synchronization = lockSynchronization;
+				}
+			}
+			
+		case "LockMutex" :
+			var callMutexLoc : new Out!Location();
+			callMutexLoc.name = "Mutex_" + self.name + "_ln" + getLineNumber (self.location) + "_getLock"; 
+			callMutexLoc.color = Out!ColorKind#ORANGE;
+			return_tuple.locs.add (callMutexLoc);
+			
+			var returnMutexLoc : new Out!Location();
+			returnMutexLoc.name = "Mutex_" + self.name + "_ln" + getLineNumber (self.location) + "_received"; 
+			returnMutexLoc.locationTimeKind = Out!LocationKind#URGENT;
+			returnMutexLoc.color = Out!ColorKind#GREEN;
+			return_tuple.locs.add (returnMutexLoc);
+			
+			var callingEdge = createEdge (prevLoc, callMutexLoc);
+			return_tuple.edges.add (callingEdge);
+			
+			var lockingEdge = createEdge (callMutexLoc, returnMutexLoc);
+			return_tuple.edges.add (lockingEdge);
+			
+			// When a mutex object available for this LockMutex, then add a sync channel
+			var possibleImplementation = mutexMap.get(self.decl_location);
+			if (possibleImplementation <> null) {
+				//The called subprocedures synchronization declarations
+				var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Mutex2uppaal_channels");
+			
+				//Setting call synchronization on the call edge
+				var lockSynchronization = new Out!Synchronization;
+				lockSynchronization.kind = Out!SynchronizationKind#SEND;
+				var lockIdentifierExpression = new Out!IdentifierExpression;
+				lockIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+				lockSynchronization.channelExpression = lockIdentifierExpression;
+				lockingEdge.synchronization = lockSynchronization;
+			}
+			
+		case "UnlockMutex" :
+			var callMutexLoc : new Out!Location();
+			callMutexLoc.name = "Mutex_" + self.name + "_ln" + getLineNumber (self.location) + "_unlock"; 
+			callMutexLoc.color = Out!ColorKind#ORANGE;
+			return_tuple.locs.add (callMutexLoc);
+			
+			var returnMutexLoc : new Out!Location();
+			returnMutexLoc.name = "Mutex_" + self.name + "_ln" + getLineNumber (self.location) + "_unlocked"; 
+			returnMutexLoc.locationTimeKind = Out!LocationKind#URGENT;
+			returnMutexLoc.color = Out!ColorKind#GREEN;
+			return_tuple.locs.add (returnMutexLoc);
+			
+			var callingEdge = createEdge (prevLoc, callMutexLoc);
+			return_tuple.edges.add (callingEdge);
+			
+			var unlockingEdge = createEdge (callMutexLoc, returnMutexLoc);
+			return_tuple.edges.add (unlockingEdge);
+			
+			//For each possible implementation of this subprocedure call
+			var possibleImplementation = mutexMap.get(self.decl_location);
+			if (possibleImplementation <> null) {
+				//The called subprocedures synchronization declarations
+				var transformedSynchronizationChannels = possibleImplementation.equivalents("ada_Mutex2uppaal_channels");
+			
+				//Setting call synchronization on the call edge
+				var lockSynchronization = new Out!Synchronization;
+				lockSynchronization.kind = Out!SynchronizationKind#SEND;
+				var lockIdentifierExpression = new Out!IdentifierExpression;
+				lockIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+				lockSynchronization.channelExpression = lockIdentifierExpression;
+				unlockingEdge.synchronization = lockSynchronization;
+			}
+			
+		case "If" : 
+		
+			// First create the Endif location to have a common exit point for all branches of the If-statement
+			var EndifLoc : new Out!Location ();
+			EndifLoc.name = "Endif_ln" + getLineNumber (self.location); 
+			EndifLoc.locationTimeKind = Out!LocationKind#URGENT;
+			
+			// add "If" location
+			var IfLoc : new Out!Location ();
+			IfLoc.name = "If_ln" + getLineNumber (self.location); 
+			IfLoc.locationTimeKind = Out!LocationKind#URGENT;
+			return_tuple.locs.add (IfLoc);
+			return_tuple.edges.add (createEdge (prevLoc, IfLoc));
+			
+			var ConditionTuple   = new Tuple();
+			ConditionTuple.locs  = new Sequence();
+			ConditionTuple.edges = new Sequence();
+			
+			var ThenTuple   = new Tuple();
+			ThenTuple.locs  = new Sequence();
+			ThenTuple.edges = new Sequence();
+			
+			var ElseTuple   = new Tuple();
+			ElseTuple.locs  = new Sequence();
+			ElseTuple.edges = new Sequence();
+			
+			var ElsifTuple   = new Tuple();
+			ElsifTuple.locs  = new Sequence();
+			ElsifTuple.edges = new Sequence();
+			
+			var ElsifConditionTuple; // initialization done later
+			var ElsifThenTuple;      // initialization done later
+			
+			// add any statements present in the conditions-part
+		    if (self.conditions <> null) {
+		    	localPrevLoc = return_tuple.locs.last();
+				for (cond_stmt in self.conditions.statement) {
+					tempTuple = cond_stmt.createLocationsAndEdges (localPrevLoc);
+					ConditionTuple.locs.addAll (tempTuple.locs);
+					ConditionTuple.edges.addAll (tempTuple.edges);
+					if (ConditionTuple.locs.notEmpty()) {
+						localPrevLoc = ConditionTuple.locs.last();
+					}
+				}
+				return_tuple.locs.addAll (ConditionTuple.locs);
+				return_tuple.edges.addAll (ConditionTuple.edges);
+			}
+			
+			// add any statements present in the then-part 
+			if (self.then <> null) {
+				localPrevLoc = return_tuple.locs.last();
+				for (then_stmt in self.then.statement) {
+					// recursive call
+					tempTuple = then_stmt.createLocationsAndEdges (localPrevLoc);
+					ThenTuple.locs.addAll (tempTuple.locs);
+					ThenTuple.edges.addAll (tempTuple.edges);
+					if (ThenTuple.locs.notEmpty()) {
+						localPrevLoc = ThenTuple.locs.last();
+					}
+				}
+				return_tuple.locs.addAll (ThenTuple.locs);
+				return_tuple.edges.addAll (ThenTuple.edges);
+			}
+			
+			// There can be multiple elsif statements
+			for (elsif_stmt in self.eContents().selectByType (In!Elsif)) {
+			
+				// Find the previous location in the control flow
+				if (ElsifConditionTuple <> null and ElsifConditionTuple.locs.notEmpty()) {
+					localPrevLoc = ElsifConditionTuple.locs.last();
+				}
+				else {
+					if (ConditionTuple.locs.notEmpty()) {
+						localPrevLoc = ConditionTuple.locs.last();
+					}
+					else {
+						localPrevLoc = IfLoc;
+					}
+				}
+				
+				//  Create new tuples for each Elsif, otherwise we cannot correctly determine the required edges
+				ElsifConditionTuple       = new Tuple();
+				ElsifConditionTuple.locs  = new Sequence();
+				ElsifConditionTuple.edges = new Sequence();
+			
+				ElsifThenTuple       = new Tuple();
+				ElsifThenTuple.locs  = new Sequence();
+				ElsifThenTuple.edges = new Sequence();
+
+				//  Add Elsif location 
+				var ElsifLoc : new Out!Location ();
+				ElsifLoc.name = "Elsif_ln" + getLineNumber (elsif_stmt.location); 
+				ElsifLoc.locationTimeKind = Out!LocationKind#URGENT;
+				return_tuple.locs.add (ElsifLoc);
+				return_tuple.edges.add (createEdge (localPrevLoc, ElsifLoc));
+		
+				// Check and loop over the elsif-condition statements 
+				if (elsif_stmt.conditions <> null) {
+					localPrevLoc = ElsifLoc;
+					for (cond_stmt in elsif_stmt.conditions.statement) {
+						tempTuple = cond_stmt.createLocationsAndEdges (localPrevLoc);
+						ElsifConditionTuple.locs.addAll (tempTuple.locs);
+						ElsifConditionTuple.edges.addAll (tempTuple.edges);
+						if (ElsifConditionTuple.locs.notEmpty()) {
+							localPrevLoc = ElsifConditionTuple.locs.last();
+						}
+					}
+					return_tuple.locs.addAll (ElsifConditionTuple.locs);
+					return_tuple.edges.addAll (ElsifConditionTuple.edges);
+				}
+				
+				// Check and loop over the elsif-then statements
+				if (elsif_stmt.then <> null) {
+					localPrevLoc = return_tuple.locs.last();
+					for (then_stmt in elsif_stmt.then.statement) {
+						tempTuple = then_stmt.createLocationsAndEdges (localPrevLoc);
+						ElsifThenTuple.locs.addAll (tempTuple.locs);
+						ElsifThenTuple.edges.addAll (tempTuple.edges);
+						if (ElsifThenTuple.locs.notEmpty()) {
+							localPrevLoc = ElsifThenTuple.locs.last();
+						}
+					}
+					return_tuple.locs.addAll (ElsifThenTuple.locs);
+					return_tuple.edges.addAll (ElsifThenTuple.edges);
+				}
+				
+				// Create edge to Endif location. When an Elsif-Then part is present it should come frome here, 
+				// otherwise check the condition-part, if this is also not present 
+				// (which should not happen because and empty endif statement should have been removed) then create and edge directly from the elsif to the endif location
+				if (ElsifThenTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (ElsifThenTuple.locs.last(), EndifLoc));
+				}
+				else {
+					if (ElsifConditionTuple.locs.notEmpty()) {
+						return_tuple.edges.add (createEdge (ElsifConditionTuple.locs.last(), EndifLoc));
+					}
+					else {
+						return_tuple.edges.add (createEdge (ElsifLoc, EndifLoc));
+					}
+				}
+			}
+			
+			if (self.`else` <> null) {
+				// Find previous location for else statement
+				if (ElsifConditionTuple <> null and ElsifConditionTuple.locs.notEmpty()) {
+					localPrevLoc = ElsifConditionTuple.locs.last();
+				}
+				else {
+					if (ConditionTuple.locs.notEmpty()) {
+						localPrevLoc = ConditionTuple.locs.last();
+					}
+					else {
+						localPrevLoc = IfLoc;
+					}
+				}
+				
+				for (else_stmt in self.`else`.statement) {
+					tempTuple = else_stmt.createLocationsAndEdges (localPrevLoc);
+					ElseTuple.locs.addAll (tempTuple.locs);
+					ElseTuple.edges.addAll (tempTuple.edges);
+					if (ElseTuple.locs.notEmpty()) {
+						localPrevLoc = ElseTuple.locs.last();
+					}
+				}
+				return_tuple.locs.addAll (ElseTuple.locs);
+				return_tuple.edges.addAll (ElseTuple.edges);
+				
+				if (ElseTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (return_tuple.locs.last(), EndifLoc));
+				}
+			}
+			
+			//  Add edges to Endif location
+			if (ThenTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (ThenTuple.locs.last(), EndifLoc));
+			}
+			else {
+				if (ConditionTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (ConditionTuple.locs.last(), EndifLoc)); // PROBLEMATIC
+				}
+				else {
+					if (ElseTuple.locs.isEmpty()) {
+						return_tuple.edges.add (createEdge (IfLoc, EndifLoc));
+					}
+				}
+			}
+			
+			// Add the Endif location at the end to make sure that the next edges are created correctly
+			return_tuple.locs.add (EndifLoc);
+		
+		case "Case" : 
+			// First create the Endcase location to have a common exit point for all branches of the Case-statement
+			var endCaseLoc : new Out!Location ();
+			endCaseLoc.name = "EndCase_ln" + getLineNumber (self.location); 
+			endCaseLoc.locationTimeKind = Out!LocationKind#URGENT;
+			
+			// add "Case" location
+			var caseLoc : new Out!Location ();
+			caseLoc.name = "Case_ln" + getLineNumber (self.location); 
+			caseLoc.locationTimeKind = Out!LocationKind#URGENT;
+			return_tuple.locs.add (caseLoc);
+			return_tuple.edges.add (createEdge (prevLoc, caseLoc));
+			
+			var caseExprTuple : new Tuple();
+			var whenTuple;
+			
+			// add any statements present in the expression-part
+		    if (self.case_expr <> null) {
+				for (expr_stmt in self.case_expr.statement) {
+					// recursive call
+					caseExprTuple = expr_stmt.createLocationsAndEdges (return_tuple.locs.last());
+					return_tuple.locs.addAll (caseExprTuple.locs);
+					return_tuple.edges.addAll (caseExprTuple.edges);
+				}
+			}
+			var lastCaseExprLoc = return_tuple.locs.last();
+			
+			// There can be multiple when statements
+			for (when_stmt in self.eContents().selectByType (In!When)) {
+				//  Create new tuples for each When, otherwise we cannot correctly determine the required edges
+				whenTuple       = new Tuple();
+				whenTuple.locs  = new Sequence();
+				whenTuple.edges = new Sequence();
+
+				//  Add When location 
+				var whenLoc : new Out!Location ();
+				whenLoc.name = "When_ln" + getLineNumber (when_stmt.location); 
+				whenLoc.locationTimeKind = Out!LocationKind#URGENT;
+				return_tuple.locs.add (whenLoc);
+				return_tuple.edges.add (createEdge (lastCaseExprLoc, whenLoc));
+		
+				// Check and loop over the condition statements
+				localPrevLoc = return_tuple.locs.last(); 
+				for (stmt in when_stmt.statement) {
+					tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+					whenTuple.locs.addAll (tempTuple.locs);
+					whenTuple.edges.addAll (tempTuple.edges);
+					if (whenTuple.locs.notEmpty()) {
+						localPrevLoc = whenTuple.locs.last();
+					}
+				}
+				return_tuple.locs.addAll (whenTuple.locs);
+				return_tuple.edges.addAll (whenTuple.edges);
+
+				if (whenTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (return_tuple.locs.last(), endCaseLoc));
+				}
+				else {
+					return_tuple.edges.add (createEdge (whenLoc, endCaseLoc));
+				}
+			}
+			
+			//  when there are no when-statements in the happy flow, create a direct edge from start or case-expression to end of case
+			if (return_tuple.locs.last() ==  lastCaseExprLoc) {
+				return_tuple.edges.add (createEdge (lastCaseExprLoc, endCaseLoc));
+			}
+			
+			// Add the EndCase location at the end to make sure that the next edges are created correctly
+			return_tuple.locs.add (endCaseLoc);
+			
+		case "For_Loop": continue;
+		case "While_Loop":
+			// First create the Endloop location
+			var endLoopLoc : new Out!Location ();
+			endLoopLoc.name = "EndLoop_ln" + getLineNumber (self.location); 
+			endLoopLoc.color = Out!ColorKind#CYAN;
+			endLoopLoc.locationTimeKind = Out!LocationKind#URGENT;
+			
+			// add "Loop" location
+			var loopLoc : new Out!Location ();
+			loopLoc.name = "Loop_ln" + getLineNumber (self.location); 
+			loopLoc.color = Out!ColorKind#CYAN;
+			loopLoc.locationTimeKind = Out!LocationKind#URGENT;
+			return_tuple.locs.add (loopLoc);
+			return_tuple.edges.add (createEdge (prevLoc, loopLoc));
+			
+			var loopTuple   = new Tuple();
+			loopTuple.locs  = new Sequence();
+			loopTuple.edges = new Sequence();
+			var loopExprTuple : new Tuple();
+			
+			// add any statements present in the expression-part
+		    if (self.loop_expr <> null) {
+				for (expr_stmt in self.loop_expr.statement) {
+					// recursive call
+					loopExprTuple = expr_stmt.createLocationsAndEdges (return_tuple.locs.last());
+					return_tuple.locs.addAll (loopExprTuple.locs);
+					return_tuple.edges.addAll (loopExprTuple.edges);
+				}
+			}
+			var lastLoopExprLoc = return_tuple.locs.last();
+			
+			// Check and loop over the condition statements
+			localPrevLoc = lastLoopExprLoc; 
+			for (stmt in self.loop_stmts.statement) {
+				tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+				loopTuple.locs.addAll (tempTuple.locs);
+				loopTuple.edges.addAll (tempTuple.edges);
+				if (loopTuple.locs.notEmpty()) {
+					localPrevLoc = loopTuple.locs.last();
+				}
+			}
+			return_tuple.locs.addAll (loopTuple.locs);
+			return_tuple.edges.addAll (loopTuple.edges);
+			
+			if (loopTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (return_tuple.locs.last(), endLoopLoc));
+				}
+			else {
+				return_tuple.edges.add (createEdge (loopLoc, endLoopLoc));
+			}
+			
+			// add looping edge
+			return_tuple.edges.add (createEdge (endLoopLoc, loopLoc));
+			
+			// Add the Endloop location at the end to make sure that the next edges are created correctly
+			return_tuple.locs.add (endLoopLoc);
+			
+		case "Loop": // The loop without conditions is assumed to run forever, therefore the endLoopLoc is disconnected, ie has no incoming edges
+			// First create the Endloop location
+			var endLoopLoc : new Out!Location ();
+			endLoopLoc.name = "EndLoop_ln" + getLineNumber (self.location); 
+			endLoopLoc.color = Out!ColorKind#CYAN;
+			endLoopLoc.locationTimeKind = Out!LocationKind#URGENT;
+			
+			// add "Loop" location
+			var loopLoc : new Out!Location ();
+			loopLoc.name = "Loop_ln" + getLineNumber (self.location);
+			loopLoc.color = Out!ColorKind#CYAN;
+			loopLoc.locationTimeKind = Out!LocationKind#URGENT;
+			return_tuple.locs.add (loopLoc);
+			return_tuple.edges.add (createEdge (prevLoc, loopLoc));
+			
+			var loopTuple   = new Tuple();
+			loopTuple.locs  = new Sequence();
+			loopTuple.edges = new Sequence();
+			
+			// Check and loop over the statements
+			localPrevLoc = return_tuple.locs.last(); 
+			for (stmt in self.statement) {
+				tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+				loopTuple.locs.addAll (tempTuple.locs);
+				loopTuple.edges.addAll (tempTuple.edges);
+				if (loopTuple.locs.notEmpty()) {
+					localPrevLoc = loopTuple.locs.last();
+				}
+			}
+			return_tuple.locs.addAll (loopTuple.locs);
+			return_tuple.edges.addAll (loopTuple.edges);
+			
+			if (loopTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (return_tuple.locs.last(), loopLoc));
+				}
+			else {
+				return_tuple.edges.add (createEdge (loopLoc, loopLoc));
+			}
+			
+			// Add the Endloop location at the end to make sure that the next edges are created correctly
+			return_tuple.locs.add (endLoopLoc);
+			
+		case "Select":
+			// First create the endSelect location to have a common exit point for all branches of the Case-statement
+			var endSelectLoc : new Out!Location ();
+			endSelectLoc.name = "EndSelect_ln" + getLineNumber (self.location); 
+			endSelectLoc.locationTimeKind = Out!LocationKind#URGENT;
+			
+			// add "Select" location
+			var selectLoc : new Out!Location ();
+			selectLoc.name = "Select_ln" + getLineNumber (self.location); 
+			selectLoc.locationTimeKind = Out!LocationKind#URGENT;
+			return_tuple.locs.add (selectLoc);
+			return_tuple.edges.add (createEdge (prevLoc, selectLoc));
+			
+			var guardTuple;
+			
+			// There can be multiple guards or 'Select_When_Parts' statements
+			for (guard_stmt in self.eContents().selectByType (In!Guard)) {
+				//  Create new tuples for each Guard, otherwise we cannot correctly determine the required edges
+				guardTuple       = new Tuple();
+				guardTuple.locs  = new Sequence();
+				guardTuple.edges = new Sequence();
+		
+				// Check and loop over the guard statements
+				localPrevLoc = selectLoc; 
+				for (stmt in guard_stmt.statement) {
+					tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+					guardTuple.locs.addAll (tempTuple.locs);
+					guardTuple.edges.addAll (tempTuple.edges);
+					if (guardTuple.locs.notEmpty()) {
+						localPrevLoc = guardTuple.locs.last();
+					}
+				}
+				return_tuple.locs.addAll (guardTuple.locs);
+				return_tuple.edges.addAll (guardTuple.edges);
+
+				if (guardTuple.locs.notEmpty()) {
+					return_tuple.edges.add (createEdge (return_tuple.locs.last(), endSelectLoc));
+				}
+			}
+			
+			// Add the EndCase location at the end to make sure that the next edges are created correctly
+			return_tuple.locs.add (endSelectLoc);
+			
+		case "Delay" :
+			var delayLoc : new Out!Location ();
+			delayLoc.name = "Delay_ln" + getLineNumber (self.location); 
+			return_tuple.locs.add (delayLoc);
+			return_tuple.edges.add (createEdge (prevLoc, delayLoc));
+			
+		//  Unhandled statement types
+		default:
+			for (stmt in self.statement) {
+				tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+				return_tuple.locs.addAll (tempTuple.locs);
+				return_tuple.edges.addAll (tempTuple.edges);
+				localPrevLoc = return_tuple.locs.last();
+			}
+	}
+	return return_tuple;
+	
+}
+
+operation createEdge (SourceLoc : Out!Location, TargetLoc : Out!Location) : Out!Edge
+{
+	var out_edge : new Out!Edge;
+	out_edge.source = SourceLoc;
+	out_edge.target = TargetLoc;
+	return out_edge;
+}
+
+//Creating call and return channels per subprocedure
+@greedy
+rule ada_Subp2uppaal_channels
+	transform in_subprocedure:In!Subprocedure to out_channelCallVariable:Out!Variable, out_channelReturnVariable:Out!Variable
+{
+	
+	//Creating, modifying and adding call channel
+	var channel_subprocedureCallDeclaration = new Out!ChannelVariableDeclaration; //Define the channel declaration for call
+	var channelTypeDefinition = new Out!TypeReference; 
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_subprocedureCallDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelCallVariable.name = in_subprocedure.getChannelName(true);
+	channel_subprocedureCallDeclaration.variable.add(out_channelCallVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_subprocedureCallDeclaration); //Adding call channel declaration to global declarations
+		
+	//Creating, modifying and adding return channel
+	var channel_subprocedureReturnDeclaration = new Out!ChannelVariableDeclaration;
+	channelTypeDefinition = new Out!TypeReference;
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_subprocedureReturnDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelReturnVariable.name = in_subprocedure.getChannelName(false);
+	channel_subprocedureReturnDeclaration.variable.add(out_channelReturnVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_subprocedureReturnDeclaration); //Adding return channel declaration to global declarations	
+
+}
+
+//Creating call and return channels per subprocedure
+rule ada_Accept2uppaal_channels
+	transform in_accept:In!Accept to out_channelCallVariable:Out!Variable, out_channelReturnVariable:Out!Variable
+{
+	
+	//Creating, modifying and adding call channel
+	var channel_subprocedureCallDeclaration = new Out!ChannelVariableDeclaration; //Define the channel declaration for call
+	var channelTypeDefinition = new Out!TypeReference; 
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_subprocedureCallDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelCallVariable.name = in_accept.getChannelName(true);
+	channel_subprocedureCallDeclaration.variable.add(out_channelCallVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_subprocedureCallDeclaration); //Adding call channel declaration to global declarations
+		
+	//Creating, modifying and adding return channel
+	var channel_subprocedureReturnDeclaration = new Out!ChannelVariableDeclaration;
+	channelTypeDefinition = new Out!TypeReference;
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_subprocedureReturnDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelReturnVariable.name = in_accept.getChannelName(false);
+	channel_subprocedureReturnDeclaration.variable.add(out_channelReturnVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_subprocedureReturnDeclaration); //Adding return channel declaration to global declarations	
+
+}
+
+// Creating call and return channels per mutex
+@lazy
+rule ada_Mutex2uppaal_channels
+	transform in_mutex:In!UnlockMutex to out_channelMutexLockVariable:Out!Variable, out_channelMutexUnlockVariable:Out!Variable
+{
+	
+	//Creating, modifying and adding call channel
+	var channel_mutexLockDeclaration = new Out!ChannelVariableDeclaration; //Define the channel declaration for call
+	var channelTypeDefinition = new Out!TypeReference; 
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_mutexLockDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelMutexLockVariable.name = in_mutex.getChannelName(true);
+	channel_mutexLockDeclaration.variable.add(out_channelMutexLockVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_mutexLockDeclaration); //Adding call channel declaration to global declarations
+		
+	//Creating, modifying and adding return channel
+	var channel_mutexUnlockDeclaration = new Out!ChannelVariableDeclaration;
+	channelTypeDefinition = new Out!TypeReference;
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_mutexUnlockDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelMutexUnlockVariable.name = in_mutex.getChannelName(false);
+	channel_mutexUnlockDeclaration.variable.add(out_channelMutexUnlockVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_mutexUnlockDeclaration); //Adding return channel declaration to global declarations	
+
+}
+
+operation ada_Mutex2uppaal_template (in_mutex : In!UnlockMutex)
+//	transform in_mutex:In!UnlockMutex to outTemplate:Out!Template, localDeclarations:Out!LocalDeclarations, unlockLocation:Out!Location, lockLocation:Out!Location
+{
+	
+	//Set the name of the template same as with the class
+	var outTemplate = new Out!Template;
+	outTemplate.name = in_mutex.getTemplateName();
+		
+	//Adding it as a template to template list of UPPAAL model
+	getUPPAALRootElement().template.add(outTemplate);
+	
+	//Adding it as an instance to system declaration
+	getUPPAALRootElement().systemDeclarations.system.instantiationList.first().template.add(outTemplate);		
+	
+	//Adding an unlock location to the template
+	var unlockLocation = new Out!Location;
+	unlockLocation.name= "unlocked";
+	//initialLocation.parentTemplate= out_Template; @reverse
+	unlockLocation.locationTimeKind= Out!LocationKind#NORMAL;
+	outTemplate.location.add(unlockLocation);
+	outTemplate.init = unlockLocation;
+	
+	//Adding a lock location to the template
+	var lockLocation = new Out!Location;
+	lockLocation.name= "locked";
+	//lockLocation.parentTemplate= out_Template; @reverse
+	lockLocation.locationTimeKind= Out!LocationKind#NORMAL;
+	outTemplate.location.add(lockLocation);
+	
+	var lockingEdge = createEdge (unlockLocation, lockLocation);
+	outTemplate.edge.add (lockingEdge);
+			
+	var unlockingEdge = createEdge (lockLocation, unlockLocation);
+	outTemplate.edge.add (unlockingEdge);
+
+	//The called subprocedures synchronization declarations
+	var transformedSynchronizationChannels = in_mutex.equivalents("ada_Mutex2uppaal_channels");
+
+	//Setting call synchronization on the call edge
+	var callSynchronization = new Out!Synchronization;
+	callSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+	var callIdentifierExpression = new Out!IdentifierExpression;
+	callIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+	callSynchronization.channelExpression = callIdentifierExpression;
+	lockingEdge.synchronization = callSynchronization;
+	
+	//Setting return synchronization on the return edge
+	var returnSynchronization = new Out!Synchronization;
+	returnSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+	returnSynchronization.channelExpression = returnIdentifierExpression;
+	unlockingEdge.synchronization = returnSynchronization;	
+	
+	//Creating local declaration area for the template
+	var localDeclarations = new Out!LocalDeclarations;
+	outTemplate.declarations = localDeclarations;
+	
+	//Creating a constant for number of instances for this template
+	var nInstancesDeclaration = new Out!DataVariableDeclaration;
+	nInstancesDeclaration.prefix = Out!DataVariablePrefix#CONST;
+	var intTypeDefinition = new Out!TypeReference;
+	intTypeDefinition.referredType = getUPPAALRootElement().int;
+	nInstancesDeclaration.typeDefinition = intTypeDefinition;
+	var nInstancesVariable = new Out!Variable;
+	nInstancesVariable.name = "N_" + outTemplate.name;
+	nInstancesDeclaration.variable.add(nInstancesVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(nInstancesDeclaration);
+	//Initializing number of instances
+	var nInstancesInitializer = new Out!ExpressionInitializer;
+	var nInitializerLiteralExpression = new Out!LiteralExpression;
+	nInitializerLiteralExpression.text = "1";
+	nInstancesInitializer.expression = nInitializerLiteralExpression;
+	nInstancesVariable.initializer = nInstancesInitializer;
+	
+	//Type declaration
+	//1. Creating the TypeDeclaration
+	var templateIdTypeDeclaration = new Out!TypeDeclaration;
+	
+	//2. Setting the type reference(DeclaredType) of the TypeDeclaration
+	var templateIdDeclaredType = new Out!DeclaredType;
+	templateIdDeclaredType.name = "pid_" + outTemplate.name;
+	templateIdDeclaredType.typeDeclaration = templateIdTypeDeclaration;
+	templateIdTypeDeclaration.type.add(templateIdDeclaredType);
+	
+	//3. Setting the typeDefinition reference of the TypeDeclaration
+		//3.1 Creating a ScalarTypeSpecification (TypeDefinition)
+		var idScalarTypeSpecification = new Out!ScalarTypeSpecification;
+	
+		//3.2 Setting sizeExpression reference of the ScalarTypeSpecification
+		var literalExpressionForScalarTypeDefinition = new Out!LiteralExpression;
+		literalExpressionForScalarTypeDefinition.text = nInstancesVariable.name;
+		idScalarTypeSpecification.sizeExpression = literalExpressionForScalarTypeDefinition;
+		
+		//3.3 Setting the typeDefinition reference of the TypeDeclaration to the ScalarTypeSpecification
+		templateIdTypeDeclaration.typeDefinition = idScalarTypeSpecification;
+	 
+	//4. Adding the TypeDeclaration to the global declarations
+	getUPPAALRootElement().globalDeclarations.declaration.add(templateIdTypeDeclaration);
+	
+}
+
+// Creating call and return channels per event
+@lazy
+rule ada_Event2uppaal_channels
+	transform in_event:In!EventObj to out_channelSetEventVariable:Out!Variable, out_channelResetEventVariable:Out!Variable, out_channelWaitForEventVariable:Out!Variable
+{
+	
+	//Creating, modifying and adding setEvent channel
+	var channel_setEventDeclaration = new Out!ChannelVariableDeclaration; //Define the channel declaration for call
+	var channelTypeDefinition = new Out!TypeReference; 
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_setEventDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelSetEventVariable.name = in_event.getEventName() + "#set";
+	channel_setEventDeclaration.variable.add(out_channelSetEventVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_setEventDeclaration); //Adding setEvent channel declaration to global declarations
+		
+	//Creating, modifying and adding resetEvent channel
+	var channel_resetEventDeclaration = new Out!ChannelVariableDeclaration;
+	channelTypeDefinition = new Out!TypeReference;
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_resetEventDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelResetEventVariable.name = in_event.getEventName()  + "#reset";
+	channel_resetEventDeclaration.variable.add(out_channelResetEventVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_resetEventDeclaration); //Adding resetEvent channel declaration to global declarations	
+	
+	//Creating, modifying and adding wiatForEvent channel
+	var channel_waitForEventDeclaration = new Out!ChannelVariableDeclaration;
+	channelTypeDefinition = new Out!TypeReference;
+	channelTypeDefinition.referredType = getUPPAALRootElement().chan;
+	channel_waitForEventDeclaration.typeDefinition = channelTypeDefinition;
+	out_channelWaitForEventVariable.name = in_event.getEventName() + "#waitforevent";
+	channel_waitForEventDeclaration.variable.add(out_channelWaitForEventVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(channel_waitForEventDeclaration); //Adding waitForEvent channel declaration to global declarations	
+
+}
+
+operation In!EventObj ada_Event2uppaal_template ()
+{
+	
+	//Set the name of the template same as with the class
+	var outTemplate = new Out!Template;
+	outTemplate.name = self.getEventName(); //name + "templ"; //in_event.getEventName();
+		
+	//Adding it as a template to template list of UPPAAL model
+	getUPPAALRootElement().template.add(outTemplate);
+	
+	//Adding it as an instance to system declaration
+	getUPPAALRootElement().systemDeclarations.system.instantiationList.first().template.add(outTemplate);		
+	
+	//Adding an unlock location to the template
+	var setLocation = new Out!Location;
+	setLocation.name= "set";
+	//initialLocation.parentTemplate= out_Template; @reverse
+	setLocation.locationTimeKind= Out!LocationKind#NORMAL;
+	outTemplate.location.add(setLocation);
+	outTemplate.init = setLocation;
+	
+	//Adding a lock location to the template
+	var unsetLocation = new Out!Location;
+	unsetLocation.name= "unset";
+	//lockLocation.parentTemplate= out_Template; @reverse
+	unsetLocation.locationTimeKind= Out!LocationKind#NORMAL;
+	outTemplate.location.add(unsetLocation);
+	
+	var settingEdge = createEdge (unsetLocation, setLocation);
+	outTemplate.edge.add (settingEdge);
+	
+	var unsettingEdge = createEdge (setLocation, unsetLocation);
+	outTemplate.edge.add (unsettingEdge);
+	
+	var selfSettingEdge = createEdge (setLocation, setLocation);
+	outTemplate.edge.add (selfSettingEdge);
+			
+	var selfUnsettingEdge = createEdge (unsetLocation, unsetLocation);
+	outTemplate.edge.add (selfUnsettingEdge);
+	
+	var waitForEventEdge = createEdge (setLocation, setLocation);
+	outTemplate.edge.add (waitForEventEdge);
+
+	//The called subprocedures synchronization declarations
+	var transformedSynchronizationChannels = self.equivalents("ada_Event2uppaal_channels"); //in_event.equivalents("ada_Event2uppaal_channels");
+
+	//Setting call synchronization on the call edge
+	var resetSync = new Out!Synchronization;
+	resetSync.kind = Out!SynchronizationKind#RECEIVE;
+	var callIdentifierExpression = new Out!IdentifierExpression;
+	callIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+	resetSync.channelExpression = callIdentifierExpression;
+	unsettingEdge.synchronization = resetSync;
+	
+	//Setting a self synchronization on the selfUnset edge
+	var resetSync = new Out!Synchronization;
+	resetSync.kind = Out!SynchronizationKind#RECEIVE;
+	var callIdentifierExpression = new Out!IdentifierExpression;
+	callIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+	resetSync.channelExpression = callIdentifierExpression;
+	selfUnsettingEdge.synchronization = resetSync;
+	
+	//Setting return synchronization on the return edge
+	var setSync = new Out!Synchronization;
+	setSync.kind = Out!SynchronizationKind#RECEIVE;
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+	setSync.channelExpression = returnIdentifierExpression;
+	settingEdge.synchronization = setSync;
+	
+	//Setting a self synchronization on the selfSet edge
+	var setSync = new Out!Synchronization;
+	setSync.kind = Out!SynchronizationKind#RECEIVE;
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+	setSync.channelExpression = returnIdentifierExpression;
+	selfSettingEdge.synchronization = setSync;		
+	
+	//Setting a synchronization on the waitForEvent edge
+	var waitForEventSync = new Out!Synchronization;
+	waitForEventSync.kind = Out!SynchronizationKind#SEND;
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(2);
+	waitForEventSync.channelExpression = returnIdentifierExpression;
+	waitForEventEdge.synchronization = waitForEventSync;		
+	
+	//Creating local declaration area for the template
+	var localDeclarations = new Out!LocalDeclarations;
+	outTemplate.declarations = localDeclarations;
+	
+	//Creating a constant for number of instances for this template
+	var nInstancesDeclaration = new Out!DataVariableDeclaration;
+	nInstancesDeclaration.prefix = Out!DataVariablePrefix#CONST;
+	var intTypeDefinition = new Out!TypeReference;
+	intTypeDefinition.referredType = getUPPAALRootElement().int;
+	nInstancesDeclaration.typeDefinition = intTypeDefinition;
+	var nInstancesVariable = new Out!Variable;
+	nInstancesVariable.name = "N_" + outTemplate.name;
+	nInstancesDeclaration.variable.add(nInstancesVariable);
+	getUPPAALRootElement().globalDeclarations.declaration.add(nInstancesDeclaration);
+	//Initializing number of instances
+	var nInstancesInitializer = new Out!ExpressionInitializer;
+	var nInitializerLiteralExpression = new Out!LiteralExpression;
+	nInitializerLiteralExpression.text = "1";
+	nInstancesInitializer.expression = nInitializerLiteralExpression;
+	nInstancesVariable.initializer = nInstancesInitializer;
+	
+	//Type declaration
+	//1. Creating the TypeDeclaration
+	var templateIdTypeDeclaration = new Out!TypeDeclaration;
+	
+	//2. Setting the type reference(DeclaredType) of the TypeDeclaration
+	var templateIdDeclaredType = new Out!DeclaredType;
+	templateIdDeclaredType.name = "pid_" + outTemplate.name;
+	templateIdDeclaredType.typeDeclaration = templateIdTypeDeclaration;
+	templateIdTypeDeclaration.type.add(templateIdDeclaredType);
+	
+	//3. Setting the typeDefinition reference of the TypeDeclaration
+		//3.1 Creating a ScalarTypeSpecification (TypeDefinition)
+		var idScalarTypeSpecification = new Out!ScalarTypeSpecification;
+	
+		//3.2 Setting sizeExpression reference of the ScalarTypeSpecification
+		var literalExpressionForScalarTypeDefinition = new Out!LiteralExpression;
+		literalExpressionForScalarTypeDefinition.text = nInstancesVariable.name;
+		idScalarTypeSpecification.sizeExpression = literalExpressionForScalarTypeDefinition;
+		
+		//3.3 Setting the typeDefinition reference of the TypeDeclaration to the ScalarTypeSpecification
+		templateIdTypeDeclaration.typeDefinition = idScalarTypeSpecification;
+	 
+	//4. Adding the TypeDeclaration to the global declarations
+	getUPPAALRootElement().globalDeclarations.declaration.add(templateIdTypeDeclaration);
+	
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				In!Statements to Out!Location Creation RULES
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Creates the synchronization locations for subprocedure calls whose implementations are available
+//The "greedy" tag forces all the subtypes of In!Call_statement are also handled. 
+@lazy
+rule ada_CallStatement2uppaal_location 
+	transform in_callStatement:In!Call_statement to out_callingLocation:Out!Location, out_waitingLocation:Out!Location, out_returningLocation:Out!Location
+{
+	
+	// Find local template root
+	var ownerTemplate = getParentSubp (in_callStatement).equivalent("ada_Subp2uppaal_Template");
+	if (ownerTemplate == null) {
+		ownerTemplate = getParentTask (in_callStatement).equivalent("ada_Task2uppaal_Template");
+	}
+	if (ownerTemplate == null) {
+		"ERROR: rule ada_CallStatement2uppaal_location could not find the parent subprocedure or task".println();
+	}
+
+	//Setting names of locations
+	out_callingLocation.name = "l_" + in_callStatement.name + "_" + getLineNumber (in_callStatement.location) + "_" + instructionIndex + "_calling";
+	out_returningLocation.name = "l_" + in_callStatement.name + "_" + getLineNumber (in_callStatement.location) + "_" + instructionIndex + "_returning";
+	instructionIndex = instructionIndex + 1;
+	
+	//Setting the colors of the locations @COLOR
+	out_callingLocation.color = Out!ColorKind#ORANGE;
+	out_returningLocation.color = Out!ColorKind#GREEN;
+	
+	//Setting location kinds to urgent for calling and returning
+	out_callingLocation.locationTimeKind= Out!LocationKind#URGENT;
+	out_returningLocation.locationTimeKind= Out!LocationKind#URGENT;
+	
+	//For each possible implementation of this subprocedure call
+	var possibleImplementations = possibleImplementationMap.get(in_callStatement);
+	if (possibleImplementations.notEmpty())
+	{
+		in_callStatement.println("Possible target(s) for: ");
+		for(curPossibleImp:In!Subprocedure in possibleImplementations)
+		{
+			curPossibleImp.println("   ");
+	
+			//Creating a waiting location
+			out_waitingLocation.name = "l_" + in_callStatement.name + "_" + getLineNumber (in_callStatement.location) + "_" + instructionIndex + "_waiting";
+			instructionIndex = instructionIndex + 1;
+			out_waitingLocation.color = Out!ColorKind#YELLOW;
+					
+			//Creating call and return edges
+			var out_callEdge = new Out!Edge;
+			var out_returnEdge = new Out!Edge;
+			
+			//Adding the edges to templates
+			out_callEdge.parentTemplate = ownerTemplate; //@REVERSE
+			out_returnEdge.parentTemplate = ownerTemplate; //@REVERSE
+			
+			//Setting source and target for each edge
+			out_callEdge.source = out_callingLocation;
+			out_callEdge.target = out_waitingLocation;
+			out_returnEdge.source = out_waitingLocation;
+			out_returnEdge.target = out_returningLocation;
+		
+			//The called subprocedures synchronization declarations
+			var transformedSynchronizationChannels = curPossibleImp.equivalents("ada_Subp2uppaal_channels");
+		
+			//Setting call synchronization on the call edge
+			var callSynchronization = new Out!Synchronization;
+			callSynchronization.kind = Out!SynchronizationKind#SEND;
+			var callIdentifierExpression = new Out!IdentifierExpression;
+			callIdentifierExpression.identifier = transformedSynchronizationChannels.get(0);
+			callSynchronization.channelExpression = callIdentifierExpression;
+			out_callEdge.synchronization = callSynchronization;
+			
+			//Setting return synchronization on the return edge
+			var returnSynchronization = new Out!Synchronization;
+			returnSynchronization.kind = Out!SynchronizationKind#RECEIVE;
+			var returnIdentifierExpression = new Out!IdentifierExpression;
+			returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+			returnSynchronization.channelExpression = returnIdentifierExpression;
+			out_returnEdge.synchronization = returnSynchronization;	
+		}
+	}
+	else {	
+		var out_edge = new Out!Edge;	
+		out_edge.source = out_callingLocation;
+		out_edge.target = out_returningLocation;
+		out_edge.parentTemplate = ownerTemplate;
+	}
+
+}
+
+@lazy
+rule ada_Accept2uppaal_location 
+	transform in_accept:In!Accept to out_callingLocation:Out!Location, out_returningLocation:Out!Location
+{
+	var ownerTemplate = getParentTask (in_accept).equivalent("ada_Task2uppaal_Template");
+	if (ownerTemplate == null) {
+		in_accept.println("Error ownerTemplate of accept statement not found: ");
+		getParentTask (in_accept).println("Parent task is: ");
+		break;
+	}
+
+	//Setting names of locations
+	out_callingLocation.name = "Accept_" + in_accept.name + "_" + getLineNumber (in_accept.location) +"_calling";
+	out_returningLocation.name = "Accept_" + in_accept.name + "_" + getLineNumber (in_accept.location) +"_returning";
+	
+	//Setting the colors of the locations @COLOR
+	out_callingLocation.color = Out!ColorKind#MAGENTA;
+	out_returningLocation.color = Out!ColorKind#BLUE;
+	
+	//Setting location kinds to urgent for calling and returning
+	out_callingLocation.locationTimeKind= Out!LocationKind#URGENT;
+	out_returningLocation.locationTimeKind= Out!LocationKind#URGENT;
+			
+	// Trigger the resursive function to add all (nested) statements of the accept statement
+	var tempTuple;
+	var loc_n_edge = new Tuple();
+	loc_n_edge.locs  = new Sequence();
+	loc_n_edge.edges = new Sequence();
+	var localPrevLoc = out_callingLocation; 
+	for (stmt in in_accept.statement) {
+		tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+		loc_n_edge.locs.addAll (tempTuple.locs);
+		loc_n_edge.edges.addAll (tempTuple.edges);
+		if (loc_n_edge.locs.notEmpty()) {
+			localPrevLoc = loc_n_edge.locs.last();
+		}
+	}
+	ownerTemplate.location.addAll (loc_n_edge.locs);
+	ownerTemplate.edge.addAll (loc_n_edge.edges);
+	
+	//Creating call and return edges
+	var out_returnEdge = new Out!Edge;
+	out_returnEdge.parentTemplate = ownerTemplate;
+	out_returnEdge.source = loc_n_edge.locs.notEmpty() ? loc_n_edge.locs.last() : out_callingLocation;
+	out_returnEdge.target = out_returningLocation;
+	
+	//The called subprocedures synchronization declarations
+	var transformedSynchronizationChannels = in_accept.equivalents("ada_Accept2uppaal_channels");
+	
+	//Setting return synchronization on the return edge
+	var returnSynchronization = new Out!Synchronization;
+	returnSynchronization.kind = Out!SynchronizationKind#SEND;
+	var returnIdentifierExpression = new Out!IdentifierExpression;
+	returnIdentifierExpression.identifier = transformedSynchronizationChannels.get(1);
+	returnSynchronization.channelExpression = returnIdentifierExpression;
+	out_returnEdge.synchronization = returnSynchronization;	
+
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				Adding "Task" Template
+//
+/*****************************************************************************/
+/*****************************************************************************/
+rule ada_Task2uppaal_Template
+	transform in_task:In!Task to out_template:Out!Template, out_start:Out!Location, out_finish:Out!Location
+{
+	
+	// Create template
+	out_template.name = in_task.getParentPackage().adaptClassNameForTemplateName() + in_task.name + "#" + getLineNumber (in_task.location);
+	
+	getUPPAALRootElement().template.add(out_template);
+	
+	// Create locations
+	out_start.name = "start";
+	out_start.locationTimeKind = Out!LocationKind#URGENT;
+	out_start.parentTemplate = out_template; // Setting location template
+	out_template.init = out_start;
+	
+	out_finish.name = "finish";
+	out_finish.parentTemplate = out_template; // Setting location template
+	out_finish.color = Out!ColorKind#RED;
+	
+	//Defining local declaration area
+	var localDeclaration = new Out!LocalDeclarations;
+	out_template.declarations = localDeclaration;
+	
+	//Adding the main template to the system declarations
+	getUPPAALRootElement().systemDeclarations.system.instantiationList.first().template.add(out_template);
+	
+	// Trigger the recursive function to add all (nested) statements of this task
+	var tempTuple;
+	var loc_n_edge = new Tuple();
+	loc_n_edge.locs  = new Sequence();
+	loc_n_edge.edges = new Sequence();
+	var localPrevLoc = out_start; 
+	for (stmt in in_task.statement) {
+		tempTuple = stmt.createLocationsAndEdges (localPrevLoc);
+		loc_n_edge.locs.addAll (tempTuple.locs);
+		loc_n_edge.edges.addAll (tempTuple.edges);
+		if (loc_n_edge.locs.notEmpty()) {
+			localPrevLoc = loc_n_edge.locs.last();
+		}
+	}
+	out_template.location.addAll (loc_n_edge.locs);
+	out_template.edge.addAll (loc_n_edge.edges);
+	
+	out_template.edge.add (createEdge (out_template.location.last(), out_finish));	
+
+}
+
+operation getLineNumber (loc_string : String) : Integer {
+	var str_seq : Sequence = loc_string.split (":"); //location="adat_thetaz-mill-attach_pos.adb:912:13: "
+	return str_seq[1].asInteger;	
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				UPPAAL Model get() OPERATIONS/FUNCTIONS
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Returns the root element of the UPPAAL model(output model)
+//Pre-condition: Rule ada_Project2uppaal_NTA has been already executed.
+@cached
+operation getUPPAALRootElement(): Out!NTA
+{	
+	return In!Project.allInstances.get(0).equivalent("ada_Project2uppaal_NTA");
+}
+
+operation getParentSubp(statement : In!Statement): In!Subprocedure
+{
+	var searchDepth = 20;
+	var localStmt = statement;
+	
+	while (localStmt.eContainer().eClass().getName() != "Subprocedure")
+	{
+		
+		localStmt = localStmt.eContainer();
+		searchDepth--;
+		if (searchDepth == 0) {
+			"WARNING getParentSubp hit searchDepth limit!".println();
+			return null;
+		}
+		
+		// hit top of search path
+		if (localStmt.eClass().getName() == "Project") {
+			return null;
+		}
+	}
+	return localStmt.eContainer();
+}
+
+operation getParentTask(statement : In!Statement): In!Task
+{
+	var searchDepth = 20;
+	var localStmt = statement;
+	
+	while (localStmt.eContainer().eClass().getName() != "Task")
+	{
+		localStmt = localStmt.eContainer();
+		searchDepth--;
+		if (searchDepth == 0) {
+			"WARNING getParentTask hit searchDepth limit!".println();
+			return null;
+		}
+		// hit top of search path
+		if (localStmt.eClass().getName() == "Project") {
+			statement.println("Cannot find parent task of ");
+			return null;
+		}
+	}
+	return localStmt.eContainer();
+}
+
+
+operation In!Statement getParentPackage(): In!Package_body
+{
+	var searchDepth = 20;
+	var localStmt = self;
+
+	while (localStmt.eContainer().eClass().getName() != "Package_body")
+	{
+		localStmt = localStmt.eContainer();
+		searchDepth--;
+		if (searchDepth == 0) {
+			"WARNING getParentPackage hit searchDepth limit!".println();
+			return null;
+		}
+		// hit top of search path
+		if (localStmt.eClass().getName() == "Project") {
+			self.println("Cannot find parent package of ");
+			return null;
+		}
+	}
+	return localStmt.eContainer();
+}
+
+operation In!Subprocedure getParentPackage(): In!Package_body
+{
+	var searchDepth = 20;
+	var localStmt = self;
+
+	while (localStmt.eContainer().eClass().getName() != "Package_body")
+	{
+		localStmt = localStmt.eContainer();
+		searchDepth--;
+		if (searchDepth == 0) {
+			"WARNING getParentPackage hit searchDepth limit!".println();
+			return null;
+		}
+		// hit top of search path
+		if (localStmt.eClass().getName() == "Project") {
+			self.println("Cannot find parent package of ");
+			return null;
+		}
+	}
+	return localStmt.eContainer();
+}
+
+operation In!Task getParentPackage(): In!Package_body
+{
+	var searchDepth = 20;
+	var localStmt = self;
+
+	while (localStmt.eContainer().eClass().getName() != "Package_body")
+	{
+		localStmt = localStmt.eContainer();
+		searchDepth--;
+		if (searchDepth == 0) {
+			"WARNING getParentPackage hit searchDepth limit!".println();
+			return null;
+		}
+		// hit top of search path
+		if (localStmt.eClass().getName() == "Project") {
+			self.println("Cannot find parent package of ");	
+			return null;
+		}
+	}
+	return localStmt.eContainer();
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				Statement OPERATIONS/FUNCTIONS
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Returns the possible implementations of this method call: Sequence (*In!Subprocedure)
+operation In!Call_statement getPossibleImplementations(): Sequence
+{
+	var possibleImplementations = new Sequence();
+	
+	for(subp in In!Subprocedure.allInstances())
+	{
+		if (subp.decl_location == self.target_location or subp.location == self.target_location)
+		{
+			possibleImplementations.add (subp);	
+		}
+	}
+	return possibleImplementations;
+}
+
+//This operation returns a map with possible method implementation list for each existing subprocedure
+operation prepareCalleesMap(): Map
+{
+	var possibleCalleesHashToReturn = new Map();
+	for(callStmt in In!Call_statement.allInstances())
+	{
+		var possibleImplementations = callStmt.getPossibleImplementations();
+		if(possibleImplementations.size() <> 0)
+		{
+			possibleCalleesHashToReturn.put(callStmt, possibleImplementations);
+		}
+		else
+		{
+			possibleCalleesHashToReturn.put(callStmt, new Sequence());
+		}
+	}
+	possibleCalleesHashToReturn.println("Implementations map: ");
+	return possibleCalleesHashToReturn;
+}
+
+//This operation returns a map with accept-statement declaration locations
+operation prepareAcceptsMap(): Map
+{
+	var acceptMapToReturn = new Map();
+	for(accept in In!Accept.allInstances())
+	{
+		if (accept.decl_location == null) {
+			acceptMapToReturn.put(accept.location, accept);
+		}
+		else {
+			acceptMapToReturn.put(accept.decl_location, accept);}
+		
+	}
+	acceptMapToReturn.println("Accepts map: ");
+	return acceptMapToReturn;
+}
+
+//This operation returns a map with Mutex-statement declaration locations
+// The map is based on the Unlock_Mutex statements in the code to make sure that no waiting on locks occurs when the unlock is not part of the happy-flow
+operation prepareMutexMap(): Map
+{
+	var mutexMapToReturn = new Map();
+	for(mutex in In!UnlockMutex.allInstances())
+	{
+		mutexMapToReturn.put(mutex.decl_location, mutex);		
+	}
+	
+	// loop again to make sure we only loop over unique mutexes 
+	for (mutex in mutexMapToReturn.values) {
+		ada_Mutex2uppaal_template(mutex);
+	}
+	
+	mutexMapToReturn.println("Mutex map: ");
+	return mutexMapToReturn;
+}
+
+operation prepareEventMap(): Map
+{
+	var eventMapToReturn = new Map();
+	for(event in In!SetEvent.allInstances())
+	{
+		var eventObj = new In!EventObj();
+		eventObj.name = event.getParentPackage().name + "_" + event.name;
+		eventObj.decl_location = event.decl_location; 
+		
+		eventMapToReturn.put(event.decl_location, eventObj);	
+	}
+	
+	for(event in In!ResetEvent.allInstances())
+	{
+	
+		var eventObj = new In!EventObj();
+		eventObj.name = event.getParentPackage().name + "_" + event.name;
+		eventObj.decl_location = event.decl_location; 
+		
+		eventMapToReturn.put(event.decl_location, eventObj);	
+	}
+	
+	// For each unique event, create a template representing this event
+	for (event in eventMapToReturn.values()) {
+		event.ada_Event2uppaal_template();
+	}
+	eventMapToReturn.println("Events map: ");
+	return eventMapToReturn;
+}
+
+// Create a unique event name
+operation In!EventObj getEventName () : String 
+{
+	return "Event_" + self.name.trim().replaceNonAlphabeticChars ("$"); // + "_" + self.decl_location.trim().replaceNonAlphabeticChars ("$");
+}
+
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				Subprocedure OPERATIONS/FUNCTIONS
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Returns the string name of the channel for this method
+//Format: <channelPureName><separationString><call/return>
+//Format: channelPureName is className(intra-modified)<separation char>subprocedureName(intra-modified)<separation char>signature(intra-modified)
+//Note: Separation string is is "#". Intra-modification string is "$".
+operation In!Subprocedure getChannelName(isCall: Boolean): String 
+{
+	var separationChar = "#";
+	var intraModificationString = "$";
+	
+	var channelPureName = "";
+	channelPureName = channelPureName + self.getParentPackage().name.replaceNonAlphabeticChars(intraModificationString);//ClassName, modified with intra-string
+	channelPureName = channelPureName + separationChar;//Separation char
+	channelPureName = channelPureName + self.name.replaceNonAlphabeticChars(intraModificationString);//Subprocedure name, modified with intra-string
+	channelPureName = channelPureName + separationChar;//Separation char
+	channelPureName = channelPureName + getLineNumber(self.location);//Signature, modified with intra-string
+	
+	if(isCall)
+	{
+		return channelPureName + separationChar + "call";
+	}
+	else
+	{
+		return channelPureName + separationChar + "return";
+	}	
+}
+
+operation In!Accept getChannelName(isCall: Boolean): String 
+{
+	var separationChar = "#";
+	var intraModificationString = "$";
+	
+	var channelPureName = "";
+	channelPureName = channelPureName + getParentTask (self).name.replaceNonAlphabeticChars(intraModificationString);//ClassName, modified with intra-string
+	channelPureName = channelPureName + separationChar;//Separation char
+	channelPureName = channelPureName + self.name.replaceNonAlphabeticChars(intraModificationString);//Subprocedure name, modified with intra-string
+	channelPureName = channelPureName + separationChar;//Separation char
+	channelPureName = channelPureName + getLineNumber(self.location);//Signature, modified with intra-string
+	
+	if(isCall)
+	{
+		return channelPureName + separationChar + "call";
+	}
+	else
+	{
+		return channelPureName + separationChar + "return";
+	}	
+}
+
+operation In!UnlockMutex getChannelName(isLock: Boolean): String 
+{
+	var separationChar = "#";
+	var intraModificationString = "$";
+	
+	var channelPureName = "";
+	channelPureName = channelPureName + self.getParentPackage().name.replaceNonAlphabeticChars(intraModificationString);//ClassName, modified with intra-string
+	channelPureName = channelPureName + separationChar;//Separation char
+	channelPureName = channelPureName + self.name.replaceNonAlphabeticChars(intraModificationString);//Mutex name, modified with intra-string
+	
+	if(isLock)
+	{
+		return channelPureName + separationChar + "lock";
+	}
+	else
+	{
+		return channelPureName + separationChar + "unlock";
+	}	
+}
+
+operation In!UnlockMutex getTemplateName(): String 
+{
+	var separationChar = "#";
+	var intraModificationString = "$";
+	
+	var tempaltePureName = "";
+	tempaltePureName = tempaltePureName + self.getParentPackage().name.replaceNonAlphabeticChars(intraModificationString);//ClassName, modified with intra-string
+	tempaltePureName = tempaltePureName + separationChar;//Separation char
+	tempaltePureName = tempaltePureName + self.name.replaceNonAlphabeticChars(intraModificationString);//Mutex name, modified with intra-string
+	
+	return tempaltePureName;
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				JBCPP!Package_body OPERATIONS/FUNCTIONS
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Changes non alphabetic chars with intra-replacement string in the class name
+//Note: Intra-replacement string is "$".
+operation In!Package_body adaptClassNameForTemplateName(): String
+{
+	var classNameIntraReplacementString = "$";
+	return self.name.replaceNonAlphabeticChars(classNameIntraReplacementString);
+}
+
+/*****************************************************************************/
+/*****************************************************************************/
+//
+//				GENERAL PURPOSE OPERATIONS/FUNCTIONS
+//
+/*****************************************************************************/
+/*****************************************************************************/
+
+//Replaces the non-alphabetic characters with the given string and returns the new string
+operation String replaceNonAlphabeticChars(replacementChar: String): String
+{
+	var smallLetters = "abcdefghijklmnopqrstuvwxyz0123456789";
+	var capitalLetters = smallLetters.toUpperCase();
+	
+	var stringToReturn = new String("");
+	
+	for (charInString: String in self.toCharSequence())//For each char in this string
+	{
+		var isAlphabeticChar = false;
+		
+		for(ac: String in smallLetters.toCharSequence())
+		{
+			if(charInString = ac)
+			{
+				isAlphabeticChar = true;
+				break;
+			}			
+		}		
+		
+		if(isAlphabeticChar = false)
+		{
+			for(ac: String in capitalLetters.toCharSequence())
+			{
+				if(charInString = ac)
+				{
+					isAlphabeticChar = true;
+					break;
+				}		
+			}
+		}
+		
+		if(isAlphabeticChar)
+		{
+			stringToReturn = stringToReturn + charInString;
+		}
+		else
+		{
+			stringToReturn = stringToReturn + replacementChar;
+		}
+	}
+	
+	return stringToReturn;
+}
