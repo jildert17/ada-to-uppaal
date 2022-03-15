@@ -1,0 +1,139 @@
+@namespace(uri="adaModel", prefix="")
+package AdaModel;
+
+class Project {
+	attr String name;
+	val Package_body[*] package_body;
+	val Statement[*] statement;
+	val Subprocedure[*] subprocedure;
+}
+
+class Package_body {
+	attr String name;
+	attr String location;
+	val Subprocedure[*] subprocedure;
+	val Task[*] task;
+	val Statement[*] statement;
+	val Package_body[*] package_body;
+}
+
+abstract class Statement {
+	attr String location;
+	val Statement[*] statement;
+}
+
+class Call_statement extends Statement {
+	attr String name;
+	attr String target_location;
+}
+
+class Return extends Statement {
+}
+
+class Statement_List {
+	val Statement[*] statement;
+}
+
+class If extends Statement {
+	val Elsif[*] elsif;
+	val Statement_List conditions;
+	val Statement_List then;
+	val Statement_List else;
+}
+
+class Elsif extends Statement {
+	val Statement_List conditions;
+	val Statement_List then;
+}
+
+class Loop extends Statement {
+}
+
+class For_Loop extends Statement {
+	val Statement_List loop_expr;
+	val Statement_List loop_stmts;
+}
+
+class While_Loop extends Statement {
+	val Statement_List loop_expr;
+	val Statement_List loop_stmts;
+}
+
+class When extends Statement {
+}
+
+class Case extends Statement {
+	val Statement_List case_expr;
+	val When[*] when;
+}
+
+class Select extends Statement {
+	val Guard[*] guards;
+	val Statement_List else;
+	val Statement_List abort;
+}
+
+class Guard extends Statement {
+}
+
+class Accept extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class Rendezvous extends Statement {
+	attr String name;
+	attr String target_location;
+}
+
+class SetEvent extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class ResetEvent extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class WaitForEvent extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class LockMutex extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class UnlockMutex extends Statement {
+	attr String name;
+	attr String decl_location;
+}
+
+class Delay extends Statement {
+}
+
+class Subprocedure {
+	attr String name;
+	attr String location;
+	attr String decl_location;
+	val Statement[*] statement;
+	val Subprocedure[*] subprocedure;
+}
+
+class Expr_function extends Subprocedure {
+}
+
+class Task {
+	attr String name;
+	attr String location;
+	val Statement[*] statement;
+	val Subprocedure[*] subprocedure;
+}
+
+class EventObj {
+	attr String name;
+	attr String decl_location;
+}
+
