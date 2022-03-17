@@ -11,7 +11,8 @@ This conversion is done in two steps: 1) a model-to-model conversion and 2) a mo
 
 This repository provides a meta model for the Ada programming language, to be used in the Eclipse Modelling Framework (EMF), and a model-to-model transformation from the given Ada (meta) model to an Uppaal meta model. The transformation is written in the ETL language (https://www.eclipse.org/epsilon/doc/etl/).
 
-The Uppaal meta model can be found here: https://github.com/egbertpostma/uppaal/tree/master/metamodel/org.muml.uppaal/model
+The Uppaal meta model can be found here: https://github.com/uppaal-emf/uppaal
+an improved version is available here: https://github.com/egbertpostma/uppaal/
 
 The Uppaal model-to-text transformation definition can be found here: 
 
